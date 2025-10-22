@@ -1,0 +1,13 @@
+# .gitignore
+
+# Entorno Virtual
+.venv/
+venv/
+
+# Archivos de Python
+__pycache__/
+*.pyc
+
+# Seguridad y Docker
+.env             # ¡NO SUBIR CREDENCIALES!
+postgres_data/   # Volúmenes de Docker
