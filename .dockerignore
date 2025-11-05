@@ -21,3 +21,5 @@ README.md
 .idea/
 *.log
 .DS_Store
+docker-compose.yml
+compose-swarm.yml
