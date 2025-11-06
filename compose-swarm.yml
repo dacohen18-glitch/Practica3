@@ -1,88 +1,80 @@
-# compose-swarm.yml
 version: '3.8'
 
 services:
-  database:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_USER: config_user
-      POSTGRES_PASSWORD: config_pass
-      POSTGRES_DB: config_db
+  postgresdb:
+    image: postgres:13
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=appuser
+      - POSTGRES_PASSWORD=appsecret
+      - POSTGRES_DB=appdb
     networks:
-      - config_network
+      - app_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     deploy:
+      mode: replicated
       replicas: 1
       placement:
         constraints:
           - node.role == manager
+
+  config-api-migrate:
+    image: victorpabon88/config-api:latest
+    networks:
+      - app_net
+    environment:
+      - DATABASE_URL_FILE=/run/secrets/database_url
+    secrets:
+      - database_url
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      - service_healthy
+    deploy:
+      mode: replicated
+      replicas: 0
       restart_policy:
         condition: on-failure
-        delay: 5s
-        max_attempts: 3
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U config_user -d config_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   config-api:
     image: victorpabon88/config-service-api:latest
+    networks:
+      - app_net
     environment:
-      DATABASE_URL: postgresql://config_user:config_pass@database:5432/config_db
-      API_USER: admin
-      API_PASSWORD: supersecrettoken
+      - DATABASE_URL_FILE=/run/secrets/database_url
+      - APP_ENVIRONMENT=production
+    secrets:
+      - database_url
     ports:
       - "8000:8000"
-    networks:
-      - config_network
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      - config-api-migrate
     deploy:
+      mode: replicated
       replicas: 3
       update_config:
         parallelism: 1
         delay: 10s
-        failure_action: rollback
-        order: start-first
-      rollback_config:
-        parallelism: 1
-        delay: 5s
       restart_policy:
         condition: on-failure
-        delay: 5s
-        max_attempts: 3
-        window: 120s
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 512M
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-      placement:
-        max_replicas_per_node: 2
-    depends_on:
-      - database
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/status/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
 
-networks:
-  config_network:
-    driver: overlay
-    attachable: true
+secrets:
+  database_url:
+    file: ./database_url.txt
 
 volumes:
   postgres_data:
     driver: local
+    driver_opts:
+      type: "nfs"
+      o: "addr=nfssrv01,rw"
+      device: ":/data/docker-vols/group03/postgres_data"
+
+networks:
+  app_net:
+    driver: overlay
